@@ -5,6 +5,8 @@ from aes import AESECB
 
 class Connect(object):
     def __init__(self):
+        self.error_message = None
+        self.title_pattern = re.compile('<title>(\S+)</title>')
         self.CT_FORM = {'Content-Type': 'application/x-www-form-urlencoded'}
         self.session = requests.Session()
         UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:60.0) Gecko/20100101 Firefox/60.0'
@@ -12,7 +14,8 @@ class Connect(object):
 
     def auth_password(self):
         login_page = self.session.get('http://www.sdei.edu.cn/uc/wcms/mobilelogin.htm')
-        if login_page.status_code == requests.codes.ok:
+        if login_page.status_code == requests.codes.ok and \
+            self.title_pattern.search(login_page.text).group(1) == '欢迎使用':
             pattern = re.compile('var aesKey = "(\w+)"')
             aes_key = re.search(pattern, login_page.text).group(1)
             if aes_key:
@@ -31,17 +34,29 @@ class Connect(object):
                             }
                     logging_in = self.session.post('http://www.sdei.edu.cn/uc/j_hh_security_check',
                             data=param, headers=self.CT_FORM)
-                    if logging_in.status_code == requests.codes.ok:
-                        pattern = re.compile('<title>(\S+)</title>')
-                        if pattern.search(logging_in.text).group(1) == '正在登录':
-                            return logging_in 
-                        else:
-                            print('登录失败')
+                    if logging_in.status_code == requests.codes.ok and \
+                        self.title_pattern.search(logging_in.text).group(1) == '正在登录':
+                        logging_in_2 = self.session.post('http://www.sdei.edu.cn/uc/DoSamlSso',
+                                data=self.get_hidden_input(logging_in.text),
+                                headers=self.CT_FORM)
+                        sc = self.session.post('http://www.sdei.edu.cn/sc/UserAction',
+                                data=self.get_hidden_input(logging_in_2.text),
+                                headers=self.CT_FORM)
+                        return sc
                     else:
-                        logging_in.raise_for_status()
+                        self.error_message = "账号密码验证失败"
                 else:
-                    print('请设置正确的环境变量')
+                    self.error_message = "请设置正确的环境变量"
             else:
-                self.auth_password()
+                self.error_message = "未找到KEY"
         else:
-            login_page.raise_for_status()
+            self.error_message = "登录页面打开错误"
+
+    @staticmethod
+    def get_hidden_input(html):
+        param = {}
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'html.parser')
+        for i in soup.find_all('input'):
+            param[i['name']] = i['value']
+        return param
