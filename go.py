@@ -1,62 +1,102 @@
 import requests
+from bs4 import BeautifulSoup
 import re
 import os
+from urllib.parse import urljoin
 from aes import AESECB
 
 class Connect(object):
     def __init__(self):
         self.error_message = None
-        self.title_pattern = re.compile('<title>(\S+)</title>')
         self.CT_FORM = {'Content-Type': 'application/x-www-form-urlencoded'}
         self.session = requests.Session()
         UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:60.0) Gecko/20100101 Firefox/60.0'
         self.session.headers.update({'User-Agent': UA})
 
-    def auth_password(self):
-        login_page = self.session.get('http://www.sdei.edu.cn/uc/wcms/mobilelogin.htm')
-        if login_page.status_code == requests.codes.ok and \
-            self.title_pattern.search(login_page.text).group(1) == '欢迎使用':
-            pattern = re.compile('var aesKey = "(\w+)"')
-            aes_key = re.search(pattern, login_page.text).group(1)
-            if aes_key:
-                username = os.getenv('LOGIN_USERNAME')
-                password = os.getenv('LOGIN_PASSWORD')
-                if username and password:
-                    param = {
-                        'hid_remember_login_state': 0,
-                        'hid_remember_me': 0,
-                        'j_password': AESECB.encrypt(password, aes_key),
-                        'j_username': username,
-                        'login_salt': None,
-                        'pwd': None,
-                        'relayUrl': None,
-                        'verify_code': None
-                            }
-                    logging_in = self.session.post('http://www.sdei.edu.cn/uc/j_hh_security_check',
-                            data=param, headers=self.CT_FORM)
-                    if logging_in.status_code == requests.codes.ok and \
-                        self.title_pattern.search(logging_in.text).group(1) == '正在登录':
-                        logging_in_2 = self.session.post('http://www.sdei.edu.cn/uc/DoSamlSso',
-                                data=self.get_hidden_input(logging_in.text),
-                                headers=self.CT_FORM)
-                        sc = self.session.post('http://www.sdei.edu.cn/sc/UserAction',
-                                data=self.get_hidden_input(logging_in_2.text),
-                                headers=self.CT_FORM)
-                        return sc
-                    else:
-                        self.error_message = "账号密码验证失败"
-                else:
-                    self.error_message = "请设置正确的环境变量"
-            else:
-                self.error_message = "未找到KEY"
-        else:
-            self.error_message = "登录页面打开错误"
+    def __enter__(self):
+        return self
 
-    @staticmethod
-    def get_hidden_input(html):
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.error_message:
+            print(self.error_message)
+        self.session.close()
+
+    def login(self):
+        page = self.session.get('http://szpj.sdei.edu.cn/zhszpj/web/index/yhIndex.htm')
+        if page.status_code == 200:
+            soup = BeautifulSoup(page.text, 'html.parser')
+            # 判断是否已经登录
+            if soup.title.string == '正在登录':
+                page = self.auto_post(page.text)
+                soup = BeautifulSoup(page.text, 'html.parser')
+                if soup.title.string == "山东省教育云服务平台":
+                    url = urljoin(page.url, soup.iframe['src'])
+                    page = self.session.get(url)
+                    soup = BeautifulSoup(page.text, 'html.parser')
+                    form = soup.find(id='login_form')
+                    post_data = {}
+                    for input_ in form.find_all('input'):
+                        post_data[input_['name']] = input_.get('value')
+                    pattern = re.compile('var aesKey = "(\w+)"')
+                    aes_key = re.search(pattern, page.text).group(1)
+                    if aes_key:
+                        username = os.getenv('LOGIN_USERNAME')
+                        password = os.getenv('LOGIN_PASSWORD')
+                        if username and password:
+                            post_data['j_username'] = username
+                            post_data['j_password'] = AESECB.encrypt(password, aes_key)
+                        else:
+                            self.error_message = '请设置环境变量'
+                    else:
+                        self.error_message = "未找到AES_KEY"
+                    url = urljoin(page.url, form['action'])
+                    page = self.session.post(url, data=post_data)
+                    page = self.auto_post(page.text)
+                    soup = BeautifulSoup(page.text, 'html.parser')
+                    if soup.title.string == '欢迎使用综合素质评价系统':
+                        m = re.search('(HHCSRFToken):"(.+)"', page.text)
+                        self.session.headers.update({m.group(1): m.group(2)})
+                else:
+                    self.error_message = '数据获取错误'
+                    print(soup.title.string)
+            elif soup.title.string == '欢迎使用综合素质评价系统':
+                print('已登录')
+                m = re.search('(HHCSRFToken):"(.+)"', page.text)
+                self.session.headers.update({m.group(1): m.group(2)})
+            else:
+               self.error_message = "获取数据异常，请稍后再试"
+        else:
+            self.error_message = "获取网页失败,请检查网络连接"
+
+    def auto_post(self, html):
         param = {}
-        from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, 'html.parser')
+        url = soup.form['action']
         for i in soup.find_all('input'):
             param[i['name']] = i['value']
-        return param
+        web = self.session.post(url, data=param)
+        return web
+
+    def query_stu(self, username=None, pageSize=10):
+        url = 'http://szpj.sdei.edu.cn/zhszpj/jcsj/glry/yhgl.do?method=queryXszhList'
+        data = {
+                'level': None, 
+                'xx_bjxx_id': None, 
+                'page': '0', 
+                'user_id': None, 
+                'dir': None, 
+                'xx_njxx_id': None, 
+                'user_name': username, 
+                'organld': '3709830003', 
+                'sort': None, 
+                'pageSize': str(pageSize)
+                }
+        if self.session.headers.get('HHCSRFToken'):
+           query = self.session.post(url, data=data)
+           if query.status_code == 200:
+               return query.json()
+           else:
+               self.error_message = '数据查询失败'
+        else:
+            self.login()
+            self.query_stuednt()
