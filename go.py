@@ -11,7 +11,7 @@ class Sdei(object):
                 'sdei': 'http://www.sdei.edu.cn/sc/',
                 'zhpj': 'http://szpj.sdei.edu.cn/zhszpj/',
                 'query_stu': 'http://szpj.sdei.edu.cn/zhszpj/jcsj/glry/yhgl.do?method=queryXszhList',
-                'chage_passwd': ''
+                'change_pwd': 'http://szpj.sdei.edu.cn/zhszpj/jcsj/uc/initPwd.do?method=initPwd'
                 }
         self.is_login = False
         self.action_sdei = False
@@ -113,15 +113,20 @@ class Sdei(object):
             self.message = '网络连接失败，无法激活应用'
         print(self.message)
 
-    def query_stu(self, username=None, pageSize=10):
+    def query_stu(self, user=None, pageSize=10):
         if not self.action_zhpj:
             self.activate('zhpj')
-        url = self.url['query_stu']
+        if user.isdigit():
+            username = None
+            user_id = user
+        else:
+            username = user
+            user_id = None
         data = {
             'level': None, 
             'xx_bjxx_id': None, 
             'page': '0', 
-            'user_id': None, 
+            'user_id': user_id, 
             'dir': None, 
             'xx_njxx_id': None, 
             'user_name': username, 
@@ -129,15 +134,30 @@ class Sdei(object):
             'sort': None, 
             'pageSize': str(pageSize)
                 }
-        query = self.session.post(url, data=data)
+        query = self.session.post(self.url['query_stu'], data=data)
         if query.status_code == 200:
             self.message = "学生信息查询成功" 
             return query.json()
         elif query.status_code == 403:
             self.activate('zhpj')
             self.message = "学生信息查询成功"
-            return self.query_stu(username=username, pageSize=pageSize)
+            return self.query_stu(user=user, pageSize=pageSize)
         else:
             self.message = '数据查询失败'
         print(self.message)
+
+    def change_pwd(self, uid, user_id, newpwd='12345678'):
+        data = {
+                'list[0].uid': uid,
+                'list[0].userId': user_id,
+                'newPwd': newpwd
+                }
+        resp = self.session.post(self.url['change_pwd'], data=data)
+        return resp
+        if resp.status_code == 200 and resp.json()['rc'] == '0':
+            self.message = "密码重置成功"
+            return True
+        else:
+            self.message = "密码重置失败"
+            print(self.message)
 
