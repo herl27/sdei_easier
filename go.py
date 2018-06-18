@@ -9,7 +9,7 @@ class Sdei(object):
     def __init__(self):
         self.url = {
                 'sdei': 'http://www.sdei.edu.cn/sc/',
-                'zhpj': 'http://szpj.sdei.edu.cn/zhszpj/web/index/yhIndex.htm',
+                'zhpj': 'http://szpj.sdei.edu.cn/zhszpj/',
                 'query_stu': 'http://szpj.sdei.edu.cn/zhszpj/jcsj/glry/yhgl.do?method=queryXszhList',
                 'chage_passwd': ''
                 }
@@ -37,6 +37,11 @@ class Sdei(object):
         pattern_title = re.compile('<title>(.+)</title>')
         return pattern_title.search(resp.text).group(1)
 
+    def update_token(self, resp):
+        pattern_token = re.compile('(HHCSRFToken):"(.+)"')
+        m = pattern_token.search(resp.text)
+        self.session.headers.update({m.group(1): m.group(2)})
+
     def login(self):
         # 访问云平台首页
         response = self.session.get('http://www.sdei.edu.cn')
@@ -50,8 +55,7 @@ class Sdei(object):
             if response.status_code == 200 and \
                 self.title(response) == "欢迎使用":
                 # 将Token加入到headers中
-                m = re.search('(HHCSRFToken):"(.+)"', response.text)
-                self.session.headers.update({m.group(1): m.group(2)})
+                self.update_token(response)
                 aes_key = re.search('var aesKey = "(\w+)"',
                     response.text).group(1)
                 username = os.getenv('LOGIN_USERNAME')
@@ -96,9 +100,11 @@ class Sdei(object):
         resp = self.get(self.url[key])
         if resp.status_code == 200:
             if self.title(resp) == "欢迎使用综合素质评价系统":
+                self.update_token(resp)
                 self.action_zhpj = True
                 self.message = "综评应用激活成功"
             elif self.title(resp) == "山东省云服务平台 - 首页":
+                self.update_token(resp)
                 self.action_sdei = True
                 self.message = "云平台首页激活成功"
             else:
@@ -124,10 +130,13 @@ class Sdei(object):
             'pageSize': str(pageSize)
                 }
         query = self.session.post(url, data=data)
-        return query
         if query.status_code == 200:
             self.message = "学生信息查询成功" 
             return query.json()
+        elif query.status_code == 403:
+            self.activate('zhpj')
+            self.message = "学生信息查询成功"
+            return self.query_stu(username=username, pageSize=pageSize)
         else:
             self.message = '数据查询失败'
         print(self.message)
