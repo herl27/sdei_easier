@@ -11,11 +11,13 @@ class Sdei(object):
                 'sdei': 'http://www.sdei.edu.cn/sc/',
                 'zhpj': 'http://szpj.sdei.edu.cn/zhszpj/',
                 'query_stu': 'http://szpj.sdei.edu.cn/zhszpj/jcsj/glry/yhgl.do?method=queryXszhList',
-                'change_pwd': 'http://szpj.sdei.edu.cn/zhszpj/jcsj/uc/initPwd.do?method=initPwd'
+                'change_pwd': 'http://szpj.sdei.edu.cn/zhszpj/jcsj/uc/initPwd.do?method=initPwd',
+                'xk': 'http://www.sdei.edu.cn/gkzx/wsc/undergraduateMajor.htm',
+                'lq': 'http://www.sdei.edu.cn/gkzx/wsc/matriculate.htm'
                 }
         self.is_login = False
-        self.action_sdei = False
-        self.action_zhpj = False
+        self.action_xk = False
+        self.action_lq = False
         self.message = None
         self.session = requests.Session()
         UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:60.0) Gecko/20100101 Firefox/60.0'
@@ -40,7 +42,9 @@ class Sdei(object):
     def update_token(self, resp):
         pattern_token = re.compile('(HHCSRFToken):"(.+)"')
         m = pattern_token.search(resp.text)
-        self.session.headers.update({m.group(1): m.group(2)})
+        if m:
+            self.session.headers.update({m.group(1): m.group(2)})
+            return True
 
     def login(self):
         # 访问云平台首页
@@ -99,14 +103,18 @@ class Sdei(object):
     def activate(self, key):
         resp = self.get(self.url[key])
         if resp.status_code == 200:
-            if self.title(resp) == "欢迎使用综合素质评价系统":
-                self.update_token(resp)
-                self.action_zhpj = True
-                self.message = "综评应用激活成功"
-            elif self.title(resp) == "山东省云服务平台 - 首页":
-                self.update_token(resp)
-                self.action_sdei = True
-                self.message = "云平台首页激活成功"
+            if self.update_token(resp):
+                if self.title(resp) == "欢迎使用综合素质评价系统":
+                    self.action_zhpj = True
+                    self.message = "综评应用激活成功"
+                elif self.title(resp) == "普通高校本科各专业类录取情况查询": 
+                    self.action_lq = True
+                    self.message = "录取应用激活成功"
+                elif self.title(resp) == "高校选考科目要求查询":
+                    self.action_xk = True
+                    self.message = "选科应用激活成功"
+                else:
+                    self.message = "未知应用"
             else:
                 self.message = "应用激活失败"
         else:
